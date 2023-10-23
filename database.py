@@ -14,3 +14,5 @@ class User(Base):
     age = Column(Integer)
     tags = Column(String(512))
     desription = Column(String(256))
+    def __repr__(self):
+        return f"User({self.id}, {self.name})"

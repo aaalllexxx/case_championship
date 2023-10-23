@@ -12,5 +12,7 @@ engine = create_engine("sqlite:///db")
 Session = sessionmaker(engine)
 session = Session()
 
-Base.metadata.drop_all(engine)
+# Base.metadata.drop_all(engine)
 Base.metadata.create_all(engine)
+
+available_tags = ["Туризм", "Волейбол", "Бег", "Футбол", "Тренажёрный зал", "Баскетбол", "Яхтинг"]
