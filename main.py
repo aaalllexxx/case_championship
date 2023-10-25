@@ -129,18 +129,30 @@ async def back_to_menu(query: CallbackQuery):
 @dp.callback_query(lambda x: "find" in x.data)
 async def find(query: CallbackQuery):
     user = get_user(query.message.chat.id)
+    declines = json.loads(user.declines or "[]")
     await query.answer()
     if user:
+        index = 0
+        if "_" in query.data:
+            index = int(query.data.split("_")[1])
         match = session.query(User).where(User.age <= user.age + 1).where(user.age - 1 <= User.age).where(
             user.id != User.id).all()
         for matched_user in match:
-            if not check_match(user.tags, matched_user.tags):
+            if not check_match(user.tags, matched_user.tags) or matched_user.id in declines:
                 match.remove(matched_user)
-        matched_user: User | bool = match[0] if match else False
+        buttons = []
+        if index > 0:
+            buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"find_{index - 1}"))
+        if index < len(match) - 1:
+            buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"find_{index + 1}"))
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons,
+                                                         [InlineKeyboardButton(text="Предложить позаниматься",
+                                                                               callback_data=f"ask_{match[index].id}")]])
+        matched_user: User | bool = match[index] if match else False
         if matched_user:
-            await query.message.answer(
+            await query.message.edit_text(
                 f"<b>{matched_user.name}</b>, <u>{matched_user.age}</u>\nОписание: <i>{matched_user.desription}</i>\nУвлечения: {', '.join(json.loads(matched_user.tags or '[]')) or None}",
-                parse_mode="HTML")
+                parse_mode="HTML", reply_markup=keyboard)
 
 
 @dp.callback_query(F.data == "profile")
@@ -189,6 +201,71 @@ async def edit_profile(query: CallbackQuery, state: FSMContext):
         keyboard = get_tags_keyboard(user.id) if data == "tags" else None
         await query.message.edit_text(messages[data], reply_markup=keyboard)
         await state.set_state(getattr(States, f"editing_{data}"))
+
+
+@dp.callback_query(lambda x: "ask" in x.data)
+async def ask(query: CallbackQuery):
+    await query.answer()
+    data = query.data.split("_")[1]
+    ask_user = get_user(data)
+    user = get_user(query.message.chat.id)
+    redirects = {1234567: "5237472052"}
+    if ask_user:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Принять ✅", callback_data=f"answer_{user.id}"),
+                              InlineKeyboardButton(text="Отклонить ❌", callback_data=f"delete_decline_{user.id}")]])
+        await bot.send_message(redirects.get(ask_user.id) or ask_user.id,
+                               f"Приглашение:\n<b>{user.name}</b>, <u>{user.age}</u>\nОписание: <i>{user.desription}</i>\nУвлечения: {', '.join(json.loads(user.tags or '[]')) or None}",
+                               parse_mode="HTML", reply_markup=keyboard)
+
+
+@dp.callback_query(lambda x: "answer" in x.data)
+async def answer(query: CallbackQuery):
+    await query.answer()
+    if "_" in query.data:
+        data = query.data.split("_")
+        user = get_user(query.message.chat.id)
+        answer_user = get_user(data[1])
+
+        declines = json.loads(answer_user.declines or "[]")
+        if user.id not in declines:
+            declines.append(user.id)
+        answer_user.declines = json.dumps(declines)
+        declines = json.loads(user.declines or "[]")
+        if answer_user.id not in declines:
+            declines.append(answer_user.id)
+        user.declines = json.dumps(declines)
+        session.commit()
+
+        keyboard_user = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Открыть диалог", url=answer_user.link)]])
+        keyboard_answer_user = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Открыть диалог", url=user.link)]])
+        await query.message.answer(
+            "Отлично! Теперь вы можете начать диалог, чтобы договориться о месте и времени занятий.",
+            reply_markup=keyboard_user)
+
+        await bot.send_message(answer_user.id,
+                               f"Пользователь {user.name} согласился позаниматься! Теперь вы можете начать диалог, чтобы договориться о месте и времени занятий.",
+                               reply_markup=keyboard_answer_user)
+        await query.message.edit_text("Заявка принята.")
+
+
+@dp.callback_query(lambda x: "delete" in x.data)
+async def delete(query: CallbackQuery):
+    await query.answer()
+    if "_" in query.data:
+        data = query.data.split("_")
+        if data[1] == "decline":
+            user = get_user(query.message.chat.id)
+            decline_user = get_user(data[2])
+            declines = json.loads(decline_user.declines or "[]")
+            if decline_user.id not in declines:
+                declines.append(user.id)
+            decline_user.declines = json.dumps(declines)
+            session.commit()
+
+    await query.message.delete()
 
 
 async def run():
