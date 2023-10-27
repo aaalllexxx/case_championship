@@ -268,6 +268,11 @@ async def delete(query: CallbackQuery):
     await query.message.delete()
 
 
+@dp.callback_query(F.data == "news")
+async def news(query: CallbackQuery):
+    await query.answer()
+    news = json.loads(open("messages.json").read() or "[]")
+
 async def run():
     print("started")
     await dp.start_polling(bot)
