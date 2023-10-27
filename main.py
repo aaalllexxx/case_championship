@@ -2,15 +2,41 @@ import asyncio
 import json
 import os.path
 
+import random
+
 from aiogram import F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    FSInputFile,
+)
 
 from database import User
 from helpers import get_user
 from settings import *
+
+
+TASKS = [
+    "Берпи (10б)",
+    "10 подтягиваний на высокой перекладине (7б)",
+    "10 Берпи (7б)",
+    "15 подтягиваний на высокой перекладине (10б)",
+    "15 приседаний (9б)",
+    "10 приседаний (7б)",
+    "3 минут планки на локтях (6б)",
+    "5 минут планки на локтях (10б)",
+    "10 отжиманий на брусьях (10б)",
+    "10 отжиманий в упоре лежа (7б)",
+    "15 отжиманий в упоре лежа (10б)",
+    "15 отжиманий на брусьях (12б)",
+]
+
+my_simple_tasks = random.choices(TASKS, k=2)
 
 
 class States(StatesGroup):
@@ -18,6 +44,7 @@ class States(StatesGroup):
     editing_age = State()
     editing_bio = State()
     editing_tags = State()
+    editing_score = State()
 
 
 def check_match(user1: str, user2: str) -> bool:
@@ -50,7 +77,10 @@ async def set_name(message: Message, state: FSMContext):
         user.name = message.text
         session.commit()
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Продолжить", callback_data="edit")]])
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Продолжить", callback_data="edit")]
+            ]
+        )
         await message.answer("Имя установлено.", reply_markup=keyboard)
         await state.clear()
 
@@ -60,11 +90,31 @@ async def set_age(message: Message, state: FSMContext):
     user = get_user(message.chat.id)
     if user:
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Продолжить", callback_data="edit")]])
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Продолжить", callback_data="edit")]
+            ]
+        )
         user.age = message.text
         session.commit()
         await message.answer("Возраст установлен.", reply_markup=keyboard)
         await state.clear()
+
+
+@dp.callback_query(lambda x: 'set_score' in x.data)
+async def set_score(query: CallbackQuery):
+    user = get_user(query.message.chat.id)
+    if user:
+        new_score, ind = query.data.split('_')[2], query.data.split('_')[3]
+        user.score += int(new_score)
+        session.commit()
+        await query.answer()
+        keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="В меню", callback_data="menu")]
+                ]
+            )
+        my_simple_tasks.pop(int(ind))
+        await query.message.answer("Баллы успешно начислены.", reply_markup=keyboard)
 
 
 @dp.message(States.editing_bio)
@@ -72,7 +122,10 @@ async def set_bio(message: Message, state: FSMContext):
     user = get_user(message.chat.id)
     if user:
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Продолжить", callback_data="edit")]])
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Продолжить", callback_data="edit")]
+            ]
+        )
         user.desription = message.text
         session.commit()
         await message.answer("Описание установлено.", reply_markup=keyboard)
@@ -84,7 +137,11 @@ async def set_tags(query: CallbackQuery, state: FSMContext):
     user = get_user(query.message.chat.id)
     if user:
         tags: list = json.loads(user.tags or "[]")
-        if query.data not in tags and query.data.lower() != "другое" and query.data.lower() != "готово":
+        if (
+            query.data not in tags
+            and query.data.lower() != "другое"
+            and query.data.lower() != "готово"
+        ):
             tags.append(query.data)
         elif query.data.lower() != "готово":
             tags.remove(query.data)
@@ -95,19 +152,33 @@ async def set_tags(query: CallbackQuery, state: FSMContext):
         user.tags = json.dumps(tags)
         session.commit()
         await query.answer()
-        await query.message.edit_text("Выберите увлечения:", reply_markup=get_tags_keyboard(user.id))
+        await query.message.edit_text(
+            "Выберите увлечения:", reply_markup=get_tags_keyboard(user.id)
+        )
 
 
 @dp.message(Command("start"))
 async def start(message: Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Новости📰", callback_data="news")],
-                                                     [InlineKeyboardButton(text="Найти друга для занятий😊",
-                                                                           callback_data="find")],
-                                                     [InlineKeyboardButton(text="Профиль👤", callback_data="profile")]])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Мероприятия📰", callback_data="news")],
+            [
+                InlineKeyboardButton(
+                    text="Найти друга для занятий😊", callback_data="find"
+                )
+            ],
+            [InlineKeyboardButton(text="Профиль👤", callback_data="profile")],
+            [InlineKeyboardButton(text="Ежедневные задания", callback_data="tasks")],
+        ]
+    )
     user = get_user(message.chat.id)
     if user:
         return await message.answer(f"Привет, {user.name}!", reply_markup=keyboard)
-    user = User(id=message.chat.id, name=message.from_user.full_name, link=f"https://t.me/{message.from_user.username}")
+    user = User(
+        id=message.chat.id,
+        name=message.from_user.full_name,
+        link=f"https://t.me/{message.from_user.username}",
+    )
     session.add(user)
     session.commit()
     await message.answer(f"Привет!", reply_markup=keyboard)
@@ -117,10 +188,18 @@ async def start(message: Message):
 async def back_to_menu(query: CallbackQuery):
     await query.answer()
     message = query.message
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Новости📰", callback_data="news")],
-                                                     [InlineKeyboardButton(text="Найти друга для занятий😊",
-                                                                           callback_data="find")],
-                                                     [InlineKeyboardButton(text="Профиль👤", callback_data="profile")]])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Мероприятия📰", callback_data="news")],
+            [
+                InlineKeyboardButton(
+                    text="Найти друга для занятий😊", callback_data="find"
+                )
+            ],
+            [InlineKeyboardButton(text="Профиль👤", callback_data="profile")],
+            [InlineKeyboardButton(text="Ежедневные задания", callback_data="tasks")],
+        ]
+    )
     user = get_user(message.chat.id)
     if user:
         return await message.edit_text(f"Привет, {user.name}!", reply_markup=keyboard)
@@ -135,30 +214,60 @@ async def find(query: CallbackQuery):
         index = 0
         if "_" in query.data:
             index = int(query.data.split("_")[1])
-        matches = session.query(User).where(User.age <= user.age + 1).where(user.age - 1 <= User.age).where(
-            user.id != User.id).all()
+        matches = (
+            session.query(User)
+            .where(User.age <= user.age + 2)
+            .where(user.age - 2 <= User.age)
+            .where(user.id != User.id)
+            .all()
+        )
         match = []
         for matched_user in matches:
-            if check_match(user.tags, matched_user.tags) and matched_user.id not in declines:
+            if (
+                check_match(user.tags, matched_user.tags)
+                and matched_user.id not in declines
+            ):
                 match.append(matched_user)
         buttons = []
         if index > 0:
-            buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"find_{index - 1}"))
+            buttons.append(
+                InlineKeyboardButton(text="⬅️", callback_data=f"find_{index - 1}")
+            )
         if index < len(match) - 1:
-            buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"find_{index + 1}"))
+            buttons.append(
+                InlineKeyboardButton(text="➡️", callback_data=f"find_{index + 1}")
+            )
         matched_user: User | bool = match[index] if match else False
         if matched_user:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons,
-                                                             [InlineKeyboardButton(text="Предложить позаниматься",
-                                                                                   callback_data=f"ask_{match[index].id}")]])
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    buttons,
+                    [
+                        InlineKeyboardButton(
+                            text="Предложить позаниматься",
+                            callback_data=f"ask_{match[index].id}",
+                        )
+                    ],
+                    [InlineKeyboardButton(text="Назад", callback_data=f"menu")],
+                ]
+            )
             await query.message.edit_text(
                 f"<b>{matched_user.name}</b>, <u>{matched_user.age}</u>\nОписание: <i>{matched_user.desription}</i>\nУвлечения: {', '.join(json.loads(matched_user.tags or '[]')) or None}",
-                parse_mode="HTML", reply_markup=keyboard)
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
         else:
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Назад", callback_data=f"menu")]
+                ]
+            )
             await query.message.answer(
                 "Никого не нашлось.\n\n"
                 "Если вы ещё не заполняли профиль - заполняйте и возвращайтесь сюда😃\n\n"
-                "Если вы уже заполнили профиль - подождите появления новых пользователей😁")
+                "Если вы уже заполнили профиль - подождите появления новых пользователей😁",
+                reply_markup=markup,
+            )
 
 
 @dp.callback_query(F.data == "profile")
@@ -168,17 +277,65 @@ async def profile(query: CallbackQuery):
     user = get_user(query.message.chat.id)
     markup = None
     if user:
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Изменить", callback_data=f"edit")],
-            [InlineKeyboardButton(text="Назад", callback_data=f"menu")]
-        ])
-        text = f"Имя: <b>{user.name}</b>\n" \
-               f"Возраст: <b>{user.age}</b>\n" \
-               f"Описание: <b>{user.desription}</b>\n" \
-               f"Увлечения: <b>{', '.join(json.loads(user.tags or '[]')) if json.loads(user.tags or '[]') else None}</b>".replace(
-            "None", "Нет данных")
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Изменить", callback_data=f"edit")],
+                [InlineKeyboardButton(text="Назад", callback_data=f"menu")],
+            ]
+        )
+        text = (
+            f"Имя: <b>{user.name}</b>\n"
+            f"Возраст: <b>{user.age}</b>\n"
+            f"Описание: <b>{user.desription}</b>\n"
+            f"Увлечения: <b>{', '.join(json.loads(user.tags or '[]')) if json.loads(user.tags or '[]') else None}</b>\n".replace(
+                "None", "Нет данных"
+            )
+        )
+        text += f"Баллы: <b>{user.score}</b>"
     if text:
-        return await query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        return await query.message.edit_text(
+            text, reply_markup=markup, parse_mode="HTML"
+        )
+
+
+@dp.callback_query(lambda x: "tasks" in x.data)
+async def tasks(query: CallbackQuery):
+    await query.answer()
+    index = 0
+    if "_" in query.data:
+        index = int(query.data.split("_")[1])
+    buttons = []
+    if index > 0:
+        buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"tasks_{index - 1}")
+        )
+    if index < len(my_simple_tasks) - 1:
+        buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"tasks_{index + 1}")
+        )
+    if not buttons:
+        keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="В меню", callback_data="menu")]
+                ]
+            )
+        await query.message.answer("На сегодня заданий больше нет.", reply_markup=keyboard)
+
+    new_score = my_simple_tasks[index].split('(')[-1].strip('б)')
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            buttons,
+            [
+                InlineKeyboardButton(
+                    text="Выполнил",
+                    callback_data=f"set_score_{new_score}_{index}",
+                )
+            ],
+            [InlineKeyboardButton(text="Назад", callback_data=f"menu")],
+            [InlineKeyboardButton(text="Как делать?", callback_data=f"work_{index}")]
+        ]
+    )
+    await query.message.edit_text(f"<b>{my_simple_tasks[index]}</b>", parse_mode="HTML", reply_markup=keyboard)
 
 
 @dp.callback_query(lambda q: "edit" in q.data)
@@ -188,20 +345,22 @@ async def edit_profile(query: CallbackQuery, state: FSMContext):
     if not user:
         return await query.message.answer("Сначала пропишите /start")
     if "_" not in query.data:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Имя", callback_data="edit_name")],
-            [InlineKeyboardButton(text="Возраст", callback_data="edit_age")],
-            [InlineKeyboardButton(text="Описание", callback_data="edit_bio")],
-            [InlineKeyboardButton(text="Увлечения", callback_data="edit_tags")],
-            [InlineKeyboardButton(text="Назад", callback_data="profile")]
-        ])
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Имя", callback_data="edit_name")],
+                [InlineKeyboardButton(text="Возраст", callback_data="edit_age")],
+                [InlineKeyboardButton(text="Описание", callback_data="edit_bio")],
+                [InlineKeyboardButton(text="Увлечения", callback_data="edit_tags")],
+                [InlineKeyboardButton(text="Назад", callback_data="profile")],
+            ]
+        )
         return query.message.edit_text("Что вы хотите изменить?", reply_markup=keyboard)
     if "_" in query.data:
         messages = {
             "name": "Введите имя:",
             "age": "Введите возраст:",
             "bio": "Введите описание:",
-            "tags": "Выберите увлечения:"
+            "tags": "Выберите увлечения:",
         }
         data = query.data.split("_")[1]
         keyboard = get_tags_keyboard(user.id) if data == "tags" else None
@@ -223,13 +382,28 @@ async def ask(query: CallbackQuery):
         user.declines = json.dumps(declines)
         session.commit()
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Принять ✅", callback_data=f"answer_{user.id}"),
-                              InlineKeyboardButton(text="Отклонить ❌", callback_data=f"delete_decline_{user.id}")]])
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Принять ✅", callback_data=f"answer_{user.id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="Отклонить ❌", callback_data=f"delete_decline_{user.id}"
+                    ),
+                ]
+            ]
+        )
         keyboard1 = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Продолжить", callback_data=f"find")]])
-        await bot.send_message(redirects.get(ask_user.id) or ask_user.id,
-                               f"Приглашение:\n<b>{user.name}</b>, <u>{user.age}</u>\nОписание: <i>{user.desription}</i>\nУвлечения: {', '.join(json.loads(user.tags or '[]')) or None}",
-                               parse_mode="HTML", reply_markup=keyboard)
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Продолжить", callback_data=f"find")]
+            ]
+        )
+        await bot.send_message(
+            redirects.get(ask_user.id) or ask_user.id,
+            f"Приглашение:\n<b>{user.name}</b>, <u>{user.age}</u>\nОписание: <i>{user.desription}</i>\nУвлечения: {', '.join(json.loads(user.tags or '[]')) or None}",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
         await query.message.edit_text("Приглашение отправлено.", reply_markup=keyboard1)
 
 
@@ -252,18 +426,31 @@ async def answer(query: CallbackQuery):
         session.commit()
 
         keyboard_user = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Открыть диалог", url=answer_user.link),
-                              InlineKeyboardButton(text="Меню", callback_data="menu")]])
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Открыть диалог", url=answer_user.link),
+                    InlineKeyboardButton(text="Меню", callback_data="menu"),
+                ]
+            ]
+        )
         keyboard_answer_user = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Открыть диалог", url=user.link),
-                              InlineKeyboardButton(text="Меню", callback_data="menu")]])
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Открыть диалог", url=user.link),
+                    InlineKeyboardButton(text="Меню", callback_data="menu"),
+                ]
+            ]
+        )
         await query.message.answer(
             "Отлично! Теперь вы можете начать диалог, чтобы договориться о месте и времени занятий.",
-            reply_markup=keyboard_user)
+            reply_markup=keyboard_user,
+        )
 
-        await bot.send_message(answer_user.id,
-                               f"Пользователь {user.name} согласился позаниматься! Теперь вы можете начать диалог, чтобы договориться о месте и времени занятий.",
-                               reply_markup=keyboard_answer_user)
+        await bot.send_message(
+            answer_user.id,
+            f"Пользователь {user.name} согласился позаниматься! Теперь вы можете начать диалог, чтобы договориться о месте и времени занятий.",
+            reply_markup=keyboard_answer_user,
+        )
         await query.message.edit_text("Заявка принята.")
 
 
@@ -281,7 +468,10 @@ async def delete(query: CallbackQuery):
             decline_user.declines = json.dumps(declines)
             session.commit()
             keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="В меню", callback_data="menu")]])
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="В меню", callback_data="menu")]
+                ]
+            )
             await query.message.answer("Заявка отклонена.", reply_markup=keyboard)
     await query.message.delete()
 
@@ -294,20 +484,31 @@ async def display_news(query: CallbackQuery):
         await query.message.delete()
         index = int(query.data.split("_")[1])
     if not os.path.exists("messages.json"):
-        return await query.message.answer("Пока что нет новостей. Как только они появятся - я вас оповещу😃")
+        return await query.message.answer(
+            "Пока что нет новостей. Как только они появятся - я вас оповещу😃"
+        )
     news = json.loads(open("messages.json", encoding="utf-8").read() or "{}")
     if not news:
-        return await query.message.answer("Пока что нет новостей. Как только они появятся - я вас оповещу😃")
+        return await query.message.answer(
+            "Пока что нет новостей. Как только они появятся - я вас оповещу😃"
+        )
     index = index % len(news)
     news = news[index]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️", callback_data=f"news_{index - 1}"),
-         InlineKeyboardButton(text="➡️", callback_data=f"news_{index + 1}")],
-        [InlineKeyboardButton(text="Закрыть❌", callback_data=f"delete")]
-    ])
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬅️", callback_data=f"news_{index - 1}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"news_{index + 1}"),
+            ],
+            [InlineKeyboardButton(text="Закрыть❌", callback_data=f"delete")],
+        ]
+    )
     if news.get("files"):
-        return await query.message.answer_photo(FSInputFile(news["files"], "rb"), caption=news["message"][:1024],
-                                                reply_markup=keyboard)
+        return await query.message.answer_photo(
+            FSInputFile(news["files"], "rb"),
+            caption=news["message"][:1024],
+            reply_markup=keyboard,
+        )
     else:
         return await query.message.answer(news["message"], reply_markup=keyboard)
 
