@@ -37,6 +37,23 @@ TASKS = [
     "15 отжиманий на брусьях (12б)"
 ]
 
+task_links = ["https://youtu.be/iiq2ILPkNDE",
+              "https://www.youtube.com/watch?v=K5UVjeNCKmY",
+              "https://youtu.be/iiq2ILPkNDE",
+              "https://www.youtube.com/watch?v=K5UVjeNCKmY",
+              "https://www.youtube.com/watch?v=51xwwaA5BnQ",
+              "https://www.youtube.com/watch?v=51xwwaA5BnQ",
+              "https://www.youtube.com/watch?v=0JtBS11DGDk",
+              "https://www.youtube.com/watch?v=0JtBS11DGDk",
+              "https://www.youtube.com/watch?v=XSmkKGKk-IA",
+              "https://www.youtube.com/watch?v=vO0ItS53Jno",
+              "https://www.youtube.com/watch?v=vO0ItS53Jno",
+              "https://www.youtube.com/watch?v=XSmkKGKk-IA"
+              ]
+task_to_link = dict(zip(TASKS, task_links))
+print(task_to_link)
+
+
 async def add_tasks():
     users = session.query(User).all()
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Смотреть", callback_data="tasks")]])
@@ -45,6 +62,7 @@ async def add_tasks():
         user.tasks = json.dumps(my_simple_tasks)
         session.commit()
         await bot.send_message(user.id, "Ежедневные задания обновлены.", reply_markup=keyboard)
+
 
 async def add_tasks_to(user_id):
     user = get_user(user_id)
@@ -362,7 +380,7 @@ async def tasks(query: CallbackQuery):
                 ),
                 InlineKeyboardButton(text="Назад", callback_data=f"menu")
             ],
-            [InlineKeyboardButton(text="Как делать?", callback_data=f"work_{index}")]
+            [InlineKeyboardButton(text="Как делать?", url=task_to_link[my_simple_tasks[index]])]
         ]
     )
     await query.message.edit_text(f"<b>{my_simple_tasks[index]}</b>", parse_mode="HTML", reply_markup=keyboard)
