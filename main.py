@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import os.path
 
@@ -8,6 +9,7 @@ from aiogram import F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+import aioschedule
 from aiogram.types import (
     Message,
     InlineKeyboardMarkup,
@@ -19,7 +21,6 @@ from aiogram.types import (
 from database import User
 from helpers import get_user
 from settings import *
-
 
 TASKS = [
     "Берпи (10б)",
@@ -33,10 +34,30 @@ TASKS = [
     "10 отжиманий на брусьях (10б)",
     "10 отжиманий в упоре лежа (7б)",
     "15 отжиманий в упоре лежа (10б)",
-    "15 отжиманий на брусьях (12б)",
+    "15 отжиманий на брусьях (12б)"
 ]
 
-my_simple_tasks = random.choices(TASKS, k=2)
+async def add_tasks():
+    users = session.query(User).all()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Смотреть", callback_data="tasks")]])
+    for user in users:
+        my_simple_tasks = random.choices(TASKS, k=3)
+        user.tasks = json.dumps(my_simple_tasks)
+        session.commit()
+        await bot.send_message(user.id, "Ежедневные задания обновлены.", reply_markup=keyboard)
+
+async def add_tasks_to(user_id):
+    user = get_user(user_id)
+    my_simple_tasks = random.choices(TASKS, k=3)
+    user.tasks = json.dumps(my_simple_tasks)
+    session.commit()
+
+
+async def run_tick():
+    print("start ticking")
+    while True:
+        await aioschedule.run_pending()
+        await asyncio.sleep(1)
 
 
 class States(StatesGroup):
@@ -44,7 +65,6 @@ class States(StatesGroup):
     editing_age = State()
     editing_bio = State()
     editing_tags = State()
-    editing_score = State()
 
 
 def check_match(user1: str, user2: str) -> bool:
@@ -104,17 +124,26 @@ async def set_age(message: Message, state: FSMContext):
 async def set_score(query: CallbackQuery):
     user = get_user(query.message.chat.id)
     if user:
-        new_score, ind = query.data.split('_')[2], query.data.split('_')[3]
+        ind = int(query.data.split('_')[2])
+        my_simple_tasks = json.loads(user.tasks or "[]")
+        try:
+            new_score = my_simple_tasks[ind].split('(')[-1].strip('б)')
+        except IndexError:
+            new_score = 0
         user.score += int(new_score)
         session.commit()
         await query.answer()
         keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="В меню", callback_data="menu")]
-                ]
-            )
-        my_simple_tasks.pop(int(ind))
-        await query.message.answer("Баллы успешно начислены.", reply_markup=keyboard)
+            inline_keyboard=[
+                [InlineKeyboardButton(text="В меню", callback_data="menu")]
+            ])
+        try:
+            my_simple_tasks.pop(int(ind))
+            user.tasks = json.dumps(my_simple_tasks)
+            session.commit()
+        except IndexError:
+            pass
+        await query.message.edit_text(f"Вам начислено {new_score} баллов.", reply_markup=keyboard)
 
 
 @dp.message(States.editing_bio)
@@ -138,9 +167,9 @@ async def set_tags(query: CallbackQuery, state: FSMContext):
     if user:
         tags: list = json.loads(user.tags or "[]")
         if (
-            query.data not in tags
-            and query.data.lower() != "другое"
-            and query.data.lower() != "готово"
+                query.data not in tags
+                and query.data.lower() != "другое"
+                and query.data.lower() != "готово"
         ):
             tags.append(query.data)
         elif query.data.lower() != "готово":
@@ -181,6 +210,7 @@ async def start(message: Message):
     )
     session.add(user)
     session.commit()
+    await add_tasks_to(user.id)
     await message.answer(f"Привет!", reply_markup=keyboard)
 
 
@@ -224,8 +254,8 @@ async def find(query: CallbackQuery):
         match = []
         for matched_user in matches:
             if (
-                check_match(user.tags, matched_user.tags)
-                and matched_user.id not in declines
+                    check_match(user.tags, matched_user.tags)
+                    and matched_user.id not in declines
             ):
                 match.append(matched_user)
         buttons = []
@@ -301,10 +331,12 @@ async def profile(query: CallbackQuery):
 @dp.callback_query(lambda x: "tasks" in x.data)
 async def tasks(query: CallbackQuery):
     await query.answer()
+    user = get_user(query.message.chat.id)
     index = 0
     if "_" in query.data:
         index = int(query.data.split("_")[1])
     buttons = []
+    my_simple_tasks = json.loads(user.tasks or "[]")
     if index > 0:
         buttons.append(
             InlineKeyboardButton(text="⬅️", callback_data=f"tasks_{index - 1}")
@@ -313,25 +345,23 @@ async def tasks(query: CallbackQuery):
         buttons.append(
             InlineKeyboardButton(text="➡️", callback_data=f"tasks_{index + 1}")
         )
-    if not buttons:
+    if not my_simple_tasks:
         keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="В меню", callback_data="menu")]
-                ]
-            )
-        await query.message.answer("На сегодня заданий больше нет.", reply_markup=keyboard)
-
-    new_score = my_simple_tasks[index].split('(')[-1].strip('б)')
+            inline_keyboard=[
+                [InlineKeyboardButton(text="В меню", callback_data="menu")]
+            ]
+        )
+        return await query.message.edit_text("На сегодня заданий больше нет.", reply_markup=keyboard)
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             buttons,
             [
                 InlineKeyboardButton(
                     text="Выполнил",
-                    callback_data=f"set_score_{new_score}_{index}",
-                )
+                    callback_data=f"set_score_{index}",
+                ),
+                InlineKeyboardButton(text="Назад", callback_data=f"menu")
             ],
-            [InlineKeyboardButton(text="Назад", callback_data=f"menu")],
             [InlineKeyboardButton(text="Как делать?", callback_data=f"work_{index}")]
         ]
     )
@@ -513,12 +543,20 @@ async def display_news(query: CallbackQuery):
         return await query.message.answer(news["message"], reply_markup=keyboard)
 
 
+async def on_startup():
+    asyncio.create_task(run_tick())
+
+
 async def run():
     print("started")
+    await add_tasks()
+
+    dp.startup.register(on_startup)
     await dp.start_polling(bot)
     print("end")
 
 
 if __name__ == "__main__":
     print("starting bot...")
+    aioschedule.every().day.at("10:00").do(add_tasks)
     asyncio.run(run())

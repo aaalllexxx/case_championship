@@ -16,6 +16,7 @@ class User(Base):
     desription = Column(String(256))
     declines = Column(String(2 ** 13))
     watched = Column(String(2 ** 15))
+    tasks = Column(String(256))
     score = Column(Integer, default=0)
 
     def __repr__(self):
