@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import json
 import os.path
-
+uo
 import random
 
 from aiogram import F
